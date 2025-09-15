@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSV → JSON Converter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <!-- Papa Parse for robust CSV parsing (auto delimiter/quotes/BOM) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b1020;          /* deep space */
+      --panel:rgba(255,255,255,0.06);
+      --panel-strong:rgba(255,255,255,0.12);
+      --text:#e7ecff;
+      --muted:#9aa5c6;
+      --accent:#7c5cff;      /* violet */
+      --accent2:#18d5ff;     /* aqua */
+      --ok:#00d1a7;          /* teal */
+      --err:#ff5c8a;         /* pink/red */
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(60rem 60rem at 10% 10%,rgba(124,92,255,.25),transparent 40%),
+        radial-gradient(50rem 50rem at 90% 20%,rgba(24,213,255,.2),transparent 35%),
+        linear-gradient(180deg,#0b1020 0%, #090e1a 100%);
+    }
+    .wrap{max-width:960px;margin:0 auto;padding:40px 20px;}
+    header{display:flex;flex-direction:column;gap:8px;margin-bottom:28px}
+    header h1{font-weight:800;letter-spacing:.3px;margin:0;font-size:clamp(28px,4vw,40px);}
+    header p{margin:0;color:var(--muted)}
+
+    /* Panels */
+    .panel{
+      background:linear-gradient(180deg,var(--panel),transparent),
+                 linear-gradient(0deg,rgba(255,255,255,.02),rgba(255,255,255,.02));
+      border:1px solid var(--panel-strong);
+      border-radius:20px;
+      padding:24px;
+      box-shadow:0 20px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .grid{display:grid;gap:18px}
+
+    /* Flow block to echo your wireframe */
+    .flow{display:grid;gap:24px}
+    .arrow{
+      display:flex;justify-content:center;align-items:center; height:48px;
+      filter: drop-shadow(0 4px 24px rgba(124,92,255,.4));
+    }
+    .arrow svg{height:48px;width:48px}
+
+    /* Dropzone */
+    .dropzone{
+      position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      border:2px dashed rgba(255,255,255,.16);
+      border-radius:16px;min-height:150px;padding:24px;gap:14px;transition:.2s border-color,.2s background;
+      cursor:pointer; text-align:center;
+    }
+    .dropzone:hover{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.03)}
+    .dz-title{font-weight:700;letter-spacing:.2px}
+    .dz-sub{font-size:14px;color:var(--muted)}
+
+    .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center}
+    .btn{
+      --bg: linear-gradient(135deg,var(--accent) 0%, var(--accent2) 100%);
+      background:var(--bg); border:none; color:white; font-weight:700; letter-spacing:.3px;
+      padding:12px 16px; border-radius:14px; cursor:pointer; transition:transform .05s ease-in;
+      box-shadow:0 6px 20px rgba(124,92,255,.35), 0 4px 10px rgba(24,213,255,.18);
+    }
+    .btn:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+    .btn:active{transform:translateY(1px)}
+
+    .chip{padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06);font-size:12px;color:var(--muted)}
+
+    /* Output */
+    #stats{font-size:14px;color:var(--muted); margin-top:6px}
+    pre{
+      background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.08);
+      border-radius:14px; padding:14px; max-height:260px; overflow:auto; margin:0; line-height:1.4;
+    }
+
+    footer{margin-top:26px;color:var(--muted);font-size:13px}
+
+    /* Toasts */
+    #toast{
+      position:fixed; top:18px; right:18px; display:flex; flex-direction:column; gap:10px; z-index:9999;
+    }
+    .toast{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; font-size:14px; color:white;
+      background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.12); box-shadow:0 8px 30px rgba(0,0,0,.35)}
+    .toast.ok{background:linear-gradient(135deg,rgba(0,209,167,.25),rgba(0,0,0,.5)); border-color:rgba(0,209,167,.4)}
+    .toast.err{background:linear-gradient(135deg,rgba(255,92,138,.25),rgba(0,0,0,.5)); border-color:rgba(255,92,138,.4)}
+
+    .note{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+    .path{font-size:13px;color:#dbe3ff;background:rgba(255,255,255,.04);padding:8px 12px;border-radius:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>CSV → JSON Converter</h1>
+      <p>Drop a CSV or choose a file. We'll auto-detect the delimiter (comma / semicolon / tab / pipe), trim headers and values, skip empty rows, and download pretty JSON with the same name.</p>
+    </header>
+
+    <main class="flow">
+      <!-- INPUT BLOCK -->
+      <section class="panel">
+        <div class="dropzone" id="dropZone">
+          <div class="dz-title">INPUT CSV FILE</div>
+          <div class="dz-sub">Drag & drop here, or</div>
+          <div class="controls">
+            <button class="btn" id="browseBtn" type="button">Choose CSV</button>
+            <span class="chip" id="fileInfo">No file selected</span>
+          </div>
+          <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+          <div class="note">Browsers cannot read arbitrary file paths for security. Use the button above to pick your file.</div>
+        </div>
+      </section>
+
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3v14" stroke="url(#g1)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M6 13l6 6 6-6" stroke="url(#g2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="g1" x1="0" x2="24" y1="0" y2="24" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7c5cff"/><stop offset="1" stop-color="#18d5ff"/>
+            </linearGradient>
+            <linearGradient id="g2" x1="0" x2="24" y1="0" y2="24" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7c5cff"/><stop offset="1" stop-color="#18d5ff"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+
+      <!-- OUTPUT BLOCK -->
+      <section class="panel">
+        <div class="grid">
+          <div>
+            <div class="dz-title">DOWNLOAD THE FILE IN BROWSER OF USER INTO JSON FORMAT</div>
+            <div class="dz-sub">Click convert to parse & download. We'll pretty-print with 2 spaces.</div>
+          </div>
+          <div class="controls">
+            <button class="btn" id="convertBtn" type="button" disabled>Convert & Download JSON</button>
+            <span class="chip" id="stats">Waiting for file…</span>
+          </div>
+          <pre id="preview" aria-label="Preview (first ~200 lines)"></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      Tip: After converting one file, you can immediately drop another to repeat. All processing happens locally in your browser.
+    </footer>
+  </div>
+
+  <div id="toast" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    (function(){
+      const fileInput = document.getElementById('fileInput');
+      const dropZone  = document.getElementById('dropZone');
+      const browseBtn = document.getElementById('browseBtn');
+      const convertBtn= document.getElementById('convertBtn');
+      const fileInfo  = document.getElementById('fileInfo');
+      const statsEl   = document.getElementById('stats');
+      const previewEl = document.getElementById('preview');
+      const toastBox  = document.getElementById('toast');
+
+      let currentFile = null;
+
+      const toast = (msg, kind='ok', timeout=2800) => {
+        const el = document.createElement('div');
+        el.className = `toast ${kind}`;
+        el.textContent = msg;
+        toastBox.appendChild(el);
+        setTimeout(()=>{ el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; }, timeout-350);
+        setTimeout(()=> el.remove(), timeout);
+      };
+
+      const setFile = (file) => {
+        if (!file) return;
+        currentFile = file;
+        fileInfo.textContent = `${file.name} • ${(file.size/1024).toFixed(1)} KB`;
+        convertBtn.disabled = false;
+        statsEl.textContent = 'Ready to convert';
+        previewEl.textContent = '';
+      };
+
+      browseBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', (e) => setFile(e.target.files?.[0]));
+
+      // Drag & Drop
+      ;['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, (e)=>{
+        e.preventDefault(); e.stopPropagation(); dropZone.style.borderColor = 'rgba(255,255,255,.36)';
+      }));
+      ;['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, (e)=>{
+        e.preventDefault(); e.stopPropagation(); dropZone.style.borderColor = 'rgba(255,255,255,.16)';
+      }));
+      dropZone.addEventListener('drop', (e)=>{
+        const file = e.dataTransfer?.files?.[0]; setFile(file);
+      });
+
+      // Trim helpers (mirrors your Python cleanup)
+      const trimHeaders = (fields=[]) => fields.map(h => (h ?? '').toString().trim());
+      const trimRow = (row) => {
+        const out = {};
+        for (const k in row){
+          const v = row[k];
+          out[k] = (typeof v === 'string') ? v.trim() : v;
+        }
+        return out;
+      };
+      const removeEmptyRows = (rows) => rows.filter(r => Object.values(r).some(v => String(v ?? '').trim() !== ''));
+
+      const pretty = (obj) => JSON.stringify(obj, null, 2);
+      const baseName = (filename) => filename.replace(/\.[^/.]+$/, '');
+
+      const convertAndDownload = () => {
+        if (!currentFile){ toast('Please choose a CSV first', 'err'); return; }
+        convertBtn.disabled = true;
+        statsEl.textContent = 'Converting…';
+
+        Papa.parse(currentFile, {
+          header: true,                 // like DictReader
+          dynamicTyping: false,         // keep strings like Python script
+          skipEmptyLines: 'greedy',     // ignore trailing blank rows
+          transformHeader: h => (h ?? '').toString().replace(/^\ufeff/, '').trim(), // strip BOM + trim
+          complete: ({ data, meta, errors }) => {
+            if (errors && errors.length){
+              // Only show first few
+              const msg = `Parsed with ${errors.length} warning(s). First: ${errors[0].message}`;
+              console.warn(errors); toast(msg, 'err', 4200);
+            }
+
+            const fields = trimHeaders(meta?.fields || []);
+            // Normalize headers for each row using trimmed field names
+            const normalized = data.map(obj => {
+              const cleaned = {};
+              fields.forEach((f) => { cleaned[f] = obj[f]; });
+              return trimRow(cleaned);
+            });
+            const finalRows = removeEmptyRows(normalized);
+
+            // Preview (cap to ~200 lines to keep UI snappy)
+            const previewText = pretty(finalRows).split('\n').slice(0, 200).join('\n');
+            previewEl.textContent = previewText + (previewText.length < pretty(finalRows).length ? '\n…' : '');
+
+            // Download
+            try {
+              const blob = new Blob([ pretty(finalRows) ], { type:'application/json;charset=utf-8' });
+              const url  = URL.createObjectURL(blob);
+              const a    = document.createElement('a');
+              a.href = url; a.download = baseName(currentFile.name) + '.json';
+              document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+              statsEl.textContent = `Done • Rows: ${finalRows.length}`;
+              toast(`✅ Converted to JSON • ${finalRows.length} rows`,'ok',3200);
+            } catch (err){
+              console.error(err); toast('Failed to create/download JSON', 'err', 4200);
+              statsEl.textContent = 'Error while downloading';
+            }
+
+            convertBtn.disabled = false;
+          },
+          error: (err) => {
+            console.error(err); toast('❌ Failed to read CSV', 'err', 4200);
+            convertBtn.disabled = false; statsEl.textContent = 'Error while reading';
+          }
+        });
+      };
+
+      convertBtn.addEventListener('click', convertAndDownload);
+    })();
+  </script>
+</body>
+</html>
